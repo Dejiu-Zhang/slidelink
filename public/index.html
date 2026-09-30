@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>SlideLink · 演示工作台</title><link rel="stylesheet" href="/style.css"><script type="module" src="/library.js"></script></head>
+<body class="library">
+<aside class="sidebar">
+  <a class="brand" href="/"><span class="brand-icon">S<span>↗</span></span> SlideLink<span class="beta">BETA</span></a>
+  <p class="sidebar-caption">YOUR PRESENTATION SPACE</p>
+  <button class="nav-item selected" id="all-projects"><span>▦</span> 全部项目 <span id="total-count" class="count">0</span></button>
+  <div class="folder-heading"><span>文件夹</span><button id="new-folder" title="新建文件夹" aria-label="新建文件夹">＋</button></div>
+  <nav id="folders" aria-label="文件夹"></nav>
+  <div class="sidebar-bottom"><p>在台下准备。<br>在台上自如。</p><button id="workspace-settings" class="nav-item">⚙ 工作空间设置</button><span>HTML slides · iPad presenter</span></div>
+</aside>
+<main class="workspace">
+  <header class="topbar"><span id="breadcrumb">工作空间 / 全部项目</span><span class="private-tag">● 私人工作空间</span></header>
+  <section id="library-view">
+    <div class="page-heading"><div><p class="eyebrow">READY WHEN YOU ARE</p><h1 id="page-title">你的下一场精彩演示。</h1><p>整理 slides、打磨讲稿，把准备留在你这一侧。</p></div><button class="primary" id="new-project">＋ 新建演示项目</button></div>
+    <div class="overview"><div><strong id="project-count">0</strong><span>演示项目</span></div><div><strong id="version-count">0</strong><span>保存的版本</span></div><div class="overview-note"><span class="split-icon">▤ │ ≡</span><span>一个项目，两个视图。<br><small>观众看 slides，你掌握全场。</small></span></div></div>
+    <div class="list-heading"><h2 id="list-title">全部项目</h2><div id="folder-actions" hidden><button class="secondary" id="rename-folder">重命名</button> <button class="secondary" id="delete-folder">移除文件夹</button></div><input id="search" type="search" placeholder="搜索项目名称…" aria-label="搜索项目"></div>
+    <div id="projects" class="project-grid"></div>
+    <div id="empty" class="empty"><span class="empty-icon">▤</span><h2>从一份 slides 开始。</h2><p>上传 HTML 和逐页讲稿，生成专属投屏与演讲者链接。<br>之后的每次修改，都可以作为新版本保留下来。</p><button id="demo" class="secondary">先体验一个示例 →</button></div>
+    <p class="footnote" id="retention"></p>
+  </section>
+  <section id="project-view" hidden>
+    <button id="back" class="text-button">← 返回项目库</button>
+    <div class="page-heading"><div><p class="eyebrow">PRESENTATION PROJECT</p><h1 id="project-name"></h1><p id="project-meta"></p></div><button id="new-version" class="primary">＋ 上传新版本</button></div>
+    <div class="project-tools"><button id="rename-project" class="secondary">重命名</button><label>移动到 <select id="move-folder" aria-label="项目文件夹"></select></label></div>
+    <div class="list-heading"><h2>版本记录</h2><span class="muted">每个版本有独立链接，旧版不会被覆盖</span></div><div id="versions"></div>
+  </section>
+  <p id="toast" class="toast" role="status" hidden></p>
+</main>
+<dialog id="upload-dialog">
+  <form id="upload-form"><header class="dialog-heading"><div><p class="eyebrow">CREATE YOUR NEXT PRESENTATION</p><h2 id="upload-title">新建演示项目</h2></div><button type="button" class="icon-button" data-close="upload-dialog" aria-label="关闭">×</button></header>
+  <div class="upload-fields"><label>项目名称<input name="title" id="title" required maxlength="150" placeholder="例如：秋季研究汇报"></label><label>版本备注<input name="versionLabel" id="version-label" maxlength="100" placeholder="例如：初稿、导师反馈后、最终版"></label></div>
+  <div class="upload-fields"><label class="dropzone"><span>01 / SLIDES</span><strong>选择 HTML slides</strong><small>自包含 HTML · 最多 6 MB</small><input type="file" id="html-file" accept=".html,.htm" required></label><label class="dropzone"><span>02 / SCRIPT</span><strong>选择你的逐页讲稿</strong><small>TXT / Markdown · 每页之间用 --- 分隔</small><input type="file" id="notes-file" accept=".txt,.md,.markdown"></label></div>
+  <details><summary>讲稿格式、画布尺寸与兼容性</summary><p>讲稿用单独一行 <code>---</code> 分隔每一页，也支持 <code># Slide 1</code> 标题。未上传讲稿时读取 HTML 内的标准 speaker notes。每页讲稿数量必须与 slides 一致。</p><p>第一版导入静态 HTML：保留文字、内联样式、SVG、图片及已渲染公式。HTML 中的 JavaScript、动画、内嵌网页和播放器不执行。外部资源请先内嵌。</p><div class="dimensions"><label>宽度<input type="number" id="canvas-width" value="1200" min="200" max="4000"></label><label>高度<input type="number" id="canvas-height" value="675" min="200" max="4000"></label></div></details>
+  <label>或直接粘贴讲稿<textarea id="notes-text" rows="4" placeholder="第一页的讲稿&#10;---&#10;第二页的讲稿"></textarea></label>
+  <div id="preview" hidden><div class="preview-heading"><strong id="preview-count"></strong><span><button type="button" id="preview-prev" class="secondary">←</button> <span id="preview-index"></span> <button type="button" id="preview-next" class="secondary">→</button></span></div><div class="preview-panels"><div id="preview-stage" class="preview-stage"><div id="preview-box" class="slide-box"><iframe id="preview-frame" title="Slide 预览" sandbox="" referrerpolicy="no-referrer"></iframe></div></div><textarea id="preview-notes" aria-label="逐页讲稿编辑" placeholder="直接在这里编辑这一页的讲稿"></textarea></div><ul id="warnings"></ul></div>
+  <p id="upload-error" class="error" role="alert"></p><footer class="dialog-actions"><span>先确认分页和讲稿，再保存版本。</span><button id="preview-button" type="button" class="secondary">检查并预览</button><button id="save-button" class="primary" disabled>保存并生成链接 →</button></footer>
+  </form>
+</dialog>
+<dialog id="settings-dialog"><header class="dialog-heading"><h2>工作空间设置</h2><button class="icon-button" data-close="settings-dialog" aria-label="关闭">×</button></header><p>你的项目通过这把工作空间密钥访问。请保存它；在另一台电脑输入同一密钥，就能打开同一个项目库。不要把密钥发给观众。</p><label>工作空间密钥<input id="workspace-key" type="password" autocomplete="off"></label><div class="button-row"><button id="copy-workspace" class="secondary">复制当前密钥</button><button id="open-workspace" class="secondary">打开此工作空间</button><button id="create-workspace" class="secondary">创建空白工作空间</button></div><label id="upload-key-label" hidden>上传口令<input id="upload-key" type="password" autocomplete="off" placeholder="由网站部署者提供"></label><p class="muted">上传口令只保存在当前浏览器会话。自己的工作空间密钥会保存在此浏览器中；清除网站数据前请备份。</p><p id="settings-message" role="status"></p></dialog>
+<dialog id="name-dialog"><form id="name-form"><header class="dialog-heading"><h2 id="name-title">名称</h2><button type="button" class="icon-button" data-close="name-dialog" aria-label="关闭">×</button></header><input id="name-input" required maxlength="150" aria-label="名称"><footer class="dialog-actions"><button class="primary">保存</button></footer></form></dialog>
+</body></html>

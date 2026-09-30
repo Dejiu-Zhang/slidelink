@@ -1,0 +1,24 @@
+{
+  "name": "slidelink",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Upload HTML slides and a script; present from an iPad with a separate audience screen.",
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "test": "node --test test/*.test.js",
+    "test:browser": "node test/browser.mjs"
+  },
+  "dependencies": {
+    "express": "5.2.1",
+    "jsdom": "27.4.0",
+    "ws": "8.22.0"
+  },
+  "devDependencies": {
+    "playwright": "^1.63.0"
+  }
+}
