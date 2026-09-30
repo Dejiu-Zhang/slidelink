@@ -1,5 +1,7 @@
 import { slideDocument, fitSlide } from './render.js';
 import { createTransport } from './transport.js';
+import { createNotesInk } from './notes-ink.js';
+import { emptyNotesInk, validateNotesInk } from './notes-ink-model.js';
 import { t, locale, initLanguage, applyLanguage } from './i18n.js';
 initLanguage();
 const $ = id=>document.getElementById(id);
@@ -19,21 +21,45 @@ try {
   if(role==='presenter')current=Math.max(0,Math.min(deck.slides.length-1,Number(stored(`page-${room}`))||0));
   const layers=deck.slides.map((s,i)=>{const e=document.createElement('div');e.className='ink-page';e.hidden=i!==current;$('slide-box').append(e);return e;});
   deck.slides.forEach((s,i)=>$('jump').add(new Option(`${i+1} · ${s.title}`,i)));
-  let host;
-  let noteInk={};try{noteInk=JSON.parse(stored(`notes-ink-${room}`)||'{}');}catch{}
+  let host, notesInk, toolState, shown=false;
+  let legacyInk={};try{legacyInk=JSON.parse(stored(`notes-ink-${room}`)||'{}');}catch{}
+  let scrollPositions={};try{scrollPositions=JSON.parse(stored(`notes-scroll-${room}`)||'{}');}catch{}
+  let lastSavedInk=JSON.stringify(deck.notesInk||emptyNotesInk());
+  let noteInkDraft=deck.notesInk||emptyNotesInk();
   let edited=false,editing=false,lastSaved=deck.notes?[...deck.notes]:[];
   if(role==='presenter'){
     try{const draft=JSON.parse(stored(`notes-draft-${room}`)||'null');if(Array.isArray(draft)&&draft.length===deck.notes.length&&draft.every(n=>typeof n==='string')){deck.notes=draft;edited=JSON.stringify(draft)!==JSON.stringify(lastSaved);}}catch{}
   }
-  let noteStatusMessage;
-  function noteStatus(text){noteStatusMessage=text; if($('notes-status'))$('notes-status').textContent=t(text || (edited?'Draft saved in this tab · Save a new version to keep changes':'Edits are saved as a new version'));}
-  function sizeEditor(){if(!editing)return;$('notes-editor').style.height='auto';$('notes-editor').style.height=`${Math.max(240,$('notes-editor').scrollHeight)}px`;}
-  function drawNotes(){
-    $('notes-ink').replaceChildren();
-    for(const points of noteInk[current]||[]){const path=document.createElementNS('http://www.w3.org/2000/svg','polyline');path.setAttribute('points',points.map(p=>p.join(',')).join(' '));path.setAttribute('fill','none');path.setAttribute('stroke','#d69223');path.setAttribute('stroke-width','4');path.setAttribute('stroke-linecap','round');$('notes-ink').append(path);}
+  if(role==='presenter') {
+    try { noteInkDraft=validateNotesInk(JSON.parse(stored(`notes-ink-v1-${room}`)||'null')||noteInkDraft,deck.notes); } catch { noteInkDraft=deck.notesInk||emptyNotesInk(); }
+    edited=edited || JSON.stringify(noteInkDraft)!==lastSavedInk;
   }
+  let noteStatusMessage, saving=false;
+  function updateEdited() {
+    edited=JSON.stringify(deck.notes)!==JSON.stringify(lastSaved) || JSON.stringify(notesInk?.snapshot()||noteInkDraft)!==lastSavedInk;
+    stored(`notes-draft-${room}`,JSON.stringify(deck.notes));
+    stored(`notes-ink-v1-${room}`,JSON.stringify(notesInk?.snapshot()||noteInkDraft));
+    noteStatus();
+  }
+  function renderTool(state=toolState) {
+    if(!state)return;toolState=state;
+    $('private-undo').disabled=editing||!state.undo;
+    $('private-redo').disabled=editing||!state.redo;
+    $('private-clear').disabled=editing||!state.hasInk;
+    $('note-tool-color').style.background=state.color||'#999';
+    const labels={r:'red pen',b:'blue pen',k:'black pen',h:'Highlighter',x:'Eraser',l:'Laser',s:'Select',q:'Select'};
+    $('note-tool-label').textContent=t(labels[state.tool]||'Pen');
+    $('notes-tool').title=t(state.supported?'Use the same pen here. Pencil marks; fingers scroll.':'Choose a pen, highlighter or eraser to mark notes.');
+  }
+  function noteStatus(text){noteStatusMessage=text; if($('notes-status'))$('notes-status').textContent=t(text || (edited?'Draft saved in this tab · Save a new version to keep changes':'Notes and marks are saved as a new version')); if($('save-notes'))$('save-notes').disabled=saving||!edited;}
+  function sizeEditor(){if(!editing)return;$('notes-editor').style.height='auto';$('notes-editor').style.height=`${Math.max(240,$('notes-editor').scrollHeight)}px`;}
+  if(role==='presenter') notesInk=createNotesInk({
+    surface:$('notes-content'),text:$('notes-text'),svg:$('notes-ink'),initial:noteInkDraft,legacy:legacyInk,
+    onChange:value=>{noteInkDraft=value;updateEdited();},onState:renderTool
+  });
   function show(i){
     const changed=current!==i;
+    if(role==='presenter'&&changed)scrollPositions[current]=$('notes-scroll').scrollTop;
     current=Math.max(0,Math.min(deck.slides.length-1,i));
     layers.forEach((e,k)=>e.hidden=k!==current);
     $('slide-frame').srcdoc=slideDocument(deck,current);
@@ -43,8 +69,10 @@ try {
       $('notes-text').textContent=deck.notes[current]||t('No notes for this slide.');
       $('notes-editor').value=deck.notes[current]||'';sizeEditor();
       $('note-page').textContent=t('Slide {number}', {number:current+1});
-      if(changed)$('notes-scroll').scrollTop=0;
-      stored(`page-${room}`,String(current));drawNotes();
+      notesInk.setPage(current,deck.notes[current]||'');
+      if(changed||!shown)$('notes-scroll').scrollTop=Number(scrollPositions[current])||0;
+      shown=true;
+      stored(`page-${room}`,String(current));
     }
     fit();host?.onmove?.();
   }
@@ -52,28 +80,30 @@ try {
   host={count:deck.slides.length,index:()=>current,show,slideEl:i=>layers[i],surface:$('stage')};
   show(current);new ResizeObserver(fit).observe($('viewport'));
   const transport=createTransport(room,key,text=>{if($('connection'))$('connection').textContent=text;});
-  window.SlideLink.start({role,room,deck:room,host,aspect:deck.width/deck.height,transport,translate:t});
+  window.SlideLink.start({role,room,deck:room,host,aspect:deck.width/deck.height,transport,translate:t,onToolChange:cfg=>notesInk?.setTool(cfg)});
   if(role==='presenter'){
     noteStatus();
+    $('notes-scroll').addEventListener('scroll',()=>{scrollPositions[current]=$('notes-scroll').scrollTop;stored(`notes-scroll-${room}`,JSON.stringify(scrollPositions));},{passive:true});
     $('edit-notes').onclick=()=>{
       editing=!editing;$('notes-text').hidden=editing;$('notes-editor').hidden=!editing;
       $('edit-notes').textContent=t(editing?'Done editing':'Edit notes');
-      $('notes-ink').hidden=editing;$('private-pen').disabled=editing;
+      notesInk.setEditing(editing);
+      if(!editing)notesInk.setPage(current,deck.notes[current]||'');
       if(editing){$('notes-editor').value=deck.notes[current];sizeEditor();$('notes-editor').focus();}
     };
-    $('notes-editor').oninput=()=>{deck.notes[current]=$('notes-editor').value;$('notes-text').textContent=deck.notes[current];edited=JSON.stringify(deck.notes)!==JSON.stringify(lastSaved);stored(`notes-draft-${room}`,JSON.stringify(deck.notes));sizeEditor();noteStatus();};
+    $('notes-editor').oninput=()=>{deck.notes[current]=$('notes-editor').value;$('notes-text').textContent=deck.notes[current];notesInk.setPage(current,deck.notes[current]);sizeEditor();updateEdited();};
     $('save-notes').onclick=async()=>{
-      $('save-notes').disabled=true;noteStatus("Saving new version…");
-      const notesToSave=[...deck.notes];
+      notesInk.finish();saving=true;noteStatus('Saving new version…');
+      const notesToSave=[...deck.notes], inkToSave=notesInk.snapshot();
       try{
-        const res=await fetch(`/api/decks/${encodeURIComponent(room)}/revisions`,{method:'POST',headers:{'Content-Type':'application/json',Authorization:`Bearer ${key}`},body:JSON.stringify({notes:notesToSave,label:t('Notes update')+' · '+new Date().toLocaleString(locale())})});
+        const res=await fetch(`/api/decks/${encodeURIComponent(room)}/revisions`,{method:'POST',headers:{'Content-Type':'application/json',Authorization:`Bearer ${key}`},body:JSON.stringify({notes:notesToSave,notesInk:inkToSave,label:t('Notes update')+' · '+new Date().toLocaleString(locale())})});
         const result=await res.json();if(!res.ok)throw Error(result.error||"Save failed");
-        lastSaved=notesToSave;edited=JSON.stringify(deck.notes)!==JSON.stringify(lastSaved);
+        lastSaved=notesToSave;lastSavedInk=JSON.stringify(inkToSave);updateEdited();
         noteStatus(edited?'Version saved; newer edits are still unsaved':'New version saved · Current screen link is unchanged');
         $('saved-links').replaceChildren();
         for(const [name,url]of [["Open new presenter",result.presenter],["Open new screen",result.screen]]){const a=document.createElement('a');a.href=url;a.target='_blank';a.rel='noopener noreferrer';a.dataset.i18n=name;a.textContent=t(name);$('saved-links').append(a);}
         $('saved-links').hidden=false;
-      }catch(e){noteStatus(e.message);}finally{$('save-notes').disabled=false;}
+      }catch(e){noteStatus(e.message);}finally{saving=false;noteStatus(noteStatusMessage);}
     };
     window.addEventListener('beforeunload',e=>{if(edited){e.preventDefault();e.returnValue='';}});
     $('previous').onclick=()=>show(current-1);$('next').onclick=()=>show(current+1);$('jump').onchange=()=>show(Number($('jump').value));
@@ -90,12 +120,14 @@ try {
     $('gutter').onpointerup=$('gutter').onpointercancel=()=>drag=false;
     $('gutter').onkeydown=e=>{if(!['ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(e.key))return;e.preventDefault();split(parseFloat($('panes').style.getPropertyValue('--split'))+(['ArrowLeft','ArrowUp'].includes(e.key)?-2:2));};
     let font=Number(stored('notes-font'))||25;
-    function setFont(n){font=Math.max(16,Math.min(46,n));$('notes-content').style.setProperty('--note-size',`${font}px`);stored('notes-font',String(font));}
+    function setFont(n){font=Math.max(16,Math.min(46,n));$('notes-content').style.setProperty('--note-size',`${font}px`);stored('notes-font',String(font));notesInk.refresh();$('font-minus').disabled=font<=16;$('font-plus').disabled=font>=46;}
     setFont(font);$('font-minus').onclick=()=>setFont(font-2);$('font-plus').onclick=()=>setFont(font+2);
     let running=false,elapsed=0,started=0;
-    $('timer').onclick=()=>{if(running){elapsed+=Date.now()-started;running=false;}else{started=Date.now();running=true;}$('timer').textContent=running?"Pause timer":"Start timer";};
+    $('timer').onclick=()=>{if(running){elapsed+=Date.now()-started;running=false;}else{started=Date.now();running=true;}$('timer').textContent=t(running?'Pause timer':'Start timer');};
     setInterval(()=>{const s=Math.floor((elapsed+(running?Date.now()-started:0))/1000);$('clock').textContent=`${String(Math.floor(s/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`;},500);
-    $('private-pen').onclick=()=>{const on=$('notes-ink').classList.toggle('drawing');$('private-pen').classList.toggle('active',on);$('private-pen').textContent=t(on?'Exit private pen':'Private pen');};
+    $('private-undo').onclick=notesInk.undo;
+    $('private-redo').onclick=notesInk.redo;
+    $('private-clear').onclick=notesInk.clear;
     applyLanguage();
     document.addEventListener('languagechange',()=>{
       document.title=deck.title+' · '+t('Presenter');
@@ -103,15 +135,10 @@ try {
       $('notes-text').textContent=deck.notes[current]||t('No notes for this slide.');
       $('edit-notes').textContent=t(editing?'Done editing':'Edit notes');
       $('timer').textContent=t(running?'Pause timer':'Start timer');
-      $('private-pen').textContent=t($('notes-ink').classList.contains('drawing')?'Exit private pen':'Private pen');
+      renderTool();notesInk.refresh();
       noteStatus(noteStatusMessage);
     });
-    let drawing=null;
-    $('notes-ink').onpointerdown=e=>{if(e.pointerType==='mouse'&&e.button!==0)return;e.preventDefault();if(drawing)return;drawing={id:e.pointerId,points:[]};(noteInk[current]||=[]).push(drawing.points);try{e.target.setPointerCapture(e.pointerId);}catch{}addPoint(e);};
-    function addPoint(e){if(!drawing||e.pointerId!==drawing.id)return;const r=$('notes-ink').getBoundingClientRect();drawing.points.push([(e.clientX-r.left)/r.width*1000,(e.clientY-r.top)/r.height*1000]);drawNotes();}
-    $('notes-ink').onpointermove=addPoint;
-    $('notes-ink').onpointerup=$('notes-ink').onpointercancel=e=>{if(drawing?.id!==e.pointerId)return;drawing=null;stored(`notes-ink-${room}`,JSON.stringify(noteInk));};
-    $('private-undo').onclick=()=>{noteInk[current]?.pop();drawNotes();stored(`notes-ink-${room}`,JSON.stringify(noteInk));};
+
   }else{
     $('notes-pane').remove();$('gutter').remove();$('footer').remove();$('header').remove();
     $('screen-hint').hidden=false;setTimeout(()=>$('screen-hint').hidden=true,6000);

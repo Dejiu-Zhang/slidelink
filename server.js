@@ -6,6 +6,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer, WebSocket } from 'ws';
 import { importDeck } from './lib/import.js';
+import { validateNotesInk, remapStrokes } from './public/notes-ink-model.js';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const token = () => randomBytes(24).toString('base64url');
@@ -161,17 +162,29 @@ export async function createApp(options = {}) {
     const { deck, role } = req.access;
     const { title, width, height, css, slides, warnings, expiresAt, format } = deck;
     // Deliberate allowlist: never send notes or presenter credentials to the screen.
-    res.json({ title, width, height, css, slides, warnings, expiresAt, format, role, ...(role === 'presenter' ? { notes: deck.notes } : {}) });
+    res.json({ title, width, height, css, slides, warnings, expiresAt, format, role, ...(role === 'presenter' ? { notes: deck.notes, notesInk: deck.notesInk || { v:1, pages:{} } } : {}) });
   });
   app.post('/api/decks/:id/revisions', limit, auth, json, async (req, res) => {
     if (req.access.role !== 'presenter') return res.status(403).json({ error: "Only the presenter can save notes." });
     const previous = req.access.deck;
     const notes = req.body?.notes;
     if (!Array.isArray(notes) || notes.length !== previous.slides.length || notes.some(n => typeof n !== 'string') || notes.join('').length > 500000) return res.status(400).json({ error: "Notes must match the slide count and stay under 500,000 characters." });
+    let notesInk;
+    try {
+      let input = req.body.notesInk;
+      if (input === undefined) {
+        input = validateNotesInk(previous.notesInk, previous.notes);
+        for (const [i, page] of Object.entries(input.pages)) {
+          page.strokes = remapStrokes(page.strokes, page.text, notes[+i]);
+          page.text = notes[+i];
+        }
+      }
+      notesInk = validateNotesInk(input, notes);
+    } catch (error) { return res.status(400).json({ error:error.message }); }
     if (decks.size >= maxDecks) return res.status(507).json({ error: "Storage is full. Delete an old version and try again." });
     const id = randomBytes(12).toString('base64url'), presenterKey = token(), screenKey = token();
     const links = { screen: `/screen.html?room=${id}#${screenKey}`, presenter: `/presenter.html?room=${id}#${presenterKey}` };
-    const saved = { ...previous, notes, originalNotes: notes.join('\n\n---\n\n'), versionLabel: String(req.body.label || "Notes update").slice(0,100), parentVersion: req.params.id, links, presenterHash: hash(presenterKey), screenHash: hash(screenKey), createdAt: Date.now(), expiresAt: retention ? Date.now() + retention : 8640000000000000 };
+    const saved = { ...previous, notes, notesInk, originalNotes: notes.join('\n\n---\n\n'), versionLabel: String(req.body.label || "Notes update").slice(0,100), parentVersion: req.params.id, links, presenterHash: hash(presenterKey), screenHash: hash(screenKey), createdAt: Date.now(), expiresAt: retention ? Date.now() + retention : 8640000000000000 };
     decks.set(id, saved);
     try { await writeFile(path.join(dataDir, `${id}.json`), JSON.stringify(saved), { flag: 'wx', mode: 0o600 }); }
     catch (error) { decks.delete(id); throw error; }

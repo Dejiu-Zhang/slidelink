@@ -338,6 +338,7 @@
         });
         var px = [5, 8, 12, 16][cfg.si], dot = bar.querySelector(".sl-sz"); dot.style.width = dot.style.height = px + "px";
         store("localStorage", "sl-pen", JSON.stringify(cfg));
+        if (opt.onToolChange) opt.onToolChange({ tool:cfg.tool, si:cfg.si, pr:cfg.pr, finger:cfg.finger });
       }
       function drop(i, ids) { if (ids.length) { remove(i, ids); send(inkMsg({ o: "d", i: i, ids: ids })); persist(); } }
       bar.addEventListener("click", function (e) {
@@ -644,5 +645,5 @@
     return global.SlideLink.link = { moved: moved, pause: setPaused, status: function () { return status()[1]; }, state: function () { return { room: !!room, topic: topic, joined: joined, slide: state.i, relays: relays.map(function (r) { return { name: r.name, up: r.up, connects: r.connects }; }), rtt: rtt, ink: ink }; } };
   }
 
-  global.SlideLink = { version: "0.1-standalone", start: start };
+  global.SlideLink = { version: "0.1-standalone", start: start, getStroke: PF.getStroke };
 })(window);

@@ -6,8 +6,8 @@ Open the screen link on the computer connected to the projector.
 
 Open the presenter link on your iPad. Try changing slides and drawing on the slide. Both actions are shared with the screen.
 
-Annotations on these notes stay private.
+Use the same pen or highlighter directly on these notes. They stay private. Use a finger to scroll, or turn on Finger to draw with touch.
 ---
-Save a new version after editing the notes.
+Save a new version after editing the notes or adding private marks. Both are included in the saved version.
 
 The old version and its links remain available. Saving does not interrupt the active presentation.

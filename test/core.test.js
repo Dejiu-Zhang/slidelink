@@ -62,10 +62,17 @@ test('workspace ownership, versions, notes privacy, WebSocket roles, deletion an
   const access=async key=>fetch(base+`/api/decks/${first.id}`,{headers:{Authorization:`Bearer ${key}`}});
   const screen=await(await access(screenKey)).json();assert.equal(screen.role,'screen');assert(!('notes'in screen));assert(!JSON.stringify(screen).includes('SCRIPT SECRET'));assert(!JSON.stringify(screen).includes('PRIVATE INLINE'));
   assert.equal((await(await access(presenterKey)).json()).notes[0],'SCRIPT SECRET');
-  const revised=await fetch(base+`/api/decks/${first.id}/revisions`,{method:'POST',headers:{'Content-Type':'application/json',Authorization:`Bearer ${presenterKey}`},body:JSON.stringify({notes:['EDITED SECRET','Finish'],label:'Edited script'})});
+  const marks={v:1,pages:{0:{text:'EDITED SECRET',strokes:[{tool:'h',width:16.8,pressure:false,points:[{a:2,x:0,y:1,p:.5},{a:3,x:0,y:1,p:.5}]}]}}};
+  const revised=await fetch(base+`/api/decks/${first.id}/revisions`,{method:'POST',headers:{'Content-Type':'application/json',Authorization:`Bearer ${presenterKey}`},body:JSON.stringify({notes:['EDITED SECRET','Finish'],notesInk:marks,label:'Edited script'})});
   assert.equal(revised.status,201);const revision=await revised.json();
   assert.equal((await(await access(presenterKey)).json()).notes[0],'SCRIPT SECRET');
   const revisedData=await(await fetch(base+`/api/decks/${revision.id}`,{headers:{Authorization:`Bearer ${revision.presenter.split('#')[1]}`}})).json();assert.equal(revisedData.notes[0],'EDITED SECRET');
+  assert.deepEqual(revisedData.notesInk,marks);
+  assert.deepEqual((await(await access(presenterKey)).json()).notesInk,{v:1,pages:{}});
+  const revisedScreen=await(await fetch(base+`/api/decks/${revision.id}`,{headers:{Authorization:`Bearer ${revision.screen.split('#')[1]}`}})).json();
+  assert(!('notesInk' in revisedScreen));assert(!JSON.stringify(revisedScreen).includes('EDITED SECRET'));
+  const malformed=await fetch(base+`/api/decks/${first.id}/revisions`,{method:'POST',headers:{'Content-Type':'application/json',Authorization:`Bearer ${presenterKey}`},body:JSON.stringify({notes:['EDITED SECRET','Finish'],notesInk:{v:1,pages:{0:{text:'EDITED SECRET',strokes:[{tool:'script'}]}}}})});
+  assert.equal(malformed.status,400);
   assert.equal((await fetch(base+`/api/decks/${first.id}/revisions`,{method:'POST',headers:{'Content-Type':'application/json',Authorization:`Bearer ${screenKey}`},body:JSON.stringify({notes:['bad','bad']})})).status,403);
   assert.equal((await access('bad')).status,404);
   assert.equal((await fetch(base+`/api/decks/${first.id}`,{method:'DELETE',headers:{Authorization:`Bearer ${screenKey}`}})).status,403);
@@ -79,6 +86,8 @@ test('workspace ownership, versions, notes privacy, WebSocket roles, deletion an
   p.close();s.close();await instance.close();
   instance=await createApp({dataDir,uploadKey:'upload-test'});await new Promise(resolve=>instance.server.listen(0,'127.0.0.1',resolve));base=`http://127.0.0.1:${instance.server.address().port}`;
   assert.equal((await(await req('/api/library')).json()).versions.length,3);assert.equal((await access(screenKey)).status,200);
+  const restored=await(await fetch(base+`/api/decks/${revision.id}`,{headers:{Authorization:`Bearer ${revision.presenter.split('#')[1]}`}})).json();
+  assert.deepEqual(restored.notesInk,marks);
   assert.equal((await fetch(base+`/api/decks/${first.id}`,{method:'DELETE',headers:{Authorization:`Bearer ${presenterKey}`}})).status,204);
   assert.equal((await access(screenKey)).status,404);assert(!(await readdir(dataDir)).includes(first.id+'.json'));
   assert.equal((await req('/api/thumbnails/'+first.id)).status,404);

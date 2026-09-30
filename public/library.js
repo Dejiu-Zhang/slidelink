@@ -23,6 +23,15 @@ const versionCount = count => t(count === 1 ? '1 version' : '{count} versions', 
 const element = (tag, className, text) => { const e = document.createElement(tag); if(className) e.className = className; if(text !== undefined) e.textContent = text; return e; };
 function button(text, className, action) { const e = element('button', className, text); e.type = 'button'; e.onclick = () => Promise.resolve(action()).catch(e => toast(e.message)); return e; }
 async function refresh() { data = await request('/api/library'); render(); }
+// Returning from the presenter should show newly saved versions without a reload.
+let lastFocusRefresh = 0;
+function refreshOnReturn() {
+  if (document.visibilityState !== 'visible' || Date.now() - lastFocusRefresh < 1000) return;
+  lastFocusRefresh = Date.now();
+  refresh().catch(error => toast(error.message));
+}
+window.addEventListener('focus', refreshOnReturn);
+document.addEventListener('visibilitychange', refreshOnReturn);
 function render() {
   $('total-count').textContent = data.projects.length;
   $('folders').replaceChildren();
