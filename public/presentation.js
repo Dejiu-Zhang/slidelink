@@ -1,17 +1,19 @@
 import { slideDocument, fitSlide } from './render.js';
 import { createTransport } from './transport.js';
+import { t, locale, initLanguage, applyLanguage } from './i18n.js';
+initLanguage();
 const $ = id=>document.getElementById(id);
 const role=location.pathname.includes('presenter')?'presenter':'screen';
 document.body.className=role;
 const room=new URLSearchParams(location.search).get('room'), key=location.hash.slice(1);
-function fatal(text){$('fatal').hidden=false;$('fatal').textContent=text;}
+function fatal(text){$('fatal').hidden=false;$('fatal').textContent=t(text);}
 try {
-  if(!room||!key)throw Error('请从项目库打开完整的演示链接。');
+  if(!room||!key)throw Error("Open the full presentation link from the library.");
   const response=await fetch(`/api/decks/${encodeURIComponent(room)}`,{headers:{Authorization:`Bearer ${key}`}});
-  if(!response.ok)throw Error('链接不正确、演示已删除或已过期。请从项目库重新打开。');
+  if(!response.ok)throw Error("Invalid, deleted or expired link. Open it again from the library.");
   const deck=await response.json();
-  if(deck.role!==role)throw Error('这不是此视图的链接，请使用项目库中的对应按钮打开。');
-  document.title=`${deck.title} · ${role==='presenter'?'演讲者':'投屏'}`;$('deck-title').textContent=deck.title;
+  if(deck.role!==role)throw Error("This link is for a different view. Use the matching library button.");
+  document.title=`${deck.title} · ${t(role==='presenter'?'Presenter':'Screen')}`;$('deck-title').textContent=deck.title;
   let current=0;
   const stored=(k,v)=>{try{if(v===undefined)return sessionStorage.getItem(k);sessionStorage.setItem(k,v);}catch{}return null;};
   if(role==='presenter')current=Math.max(0,Math.min(deck.slides.length-1,Number(stored(`page-${room}`))||0));
@@ -23,7 +25,8 @@ try {
   if(role==='presenter'){
     try{const draft=JSON.parse(stored(`notes-draft-${room}`)||'null');if(Array.isArray(draft)&&draft.length===deck.notes.length&&draft.every(n=>typeof n==='string')){deck.notes=draft;edited=JSON.stringify(draft)!==JSON.stringify(lastSaved);}}catch{}
   }
-  function noteStatus(text){if($('notes-status'))$('notes-status').textContent=text|| (edited?'草稿保存在本标签页 · 点击保存新版本':'讲稿可编辑 · 修改后保存为新版本');}
+  let noteStatusMessage;
+  function noteStatus(text){noteStatusMessage=text; if($('notes-status'))$('notes-status').textContent=t(text || (edited?'Draft saved in this tab · Save a new version to keep changes':'Edits are saved as a new version'));}
   function sizeEditor(){if(!editing)return;$('notes-editor').style.height='auto';$('notes-editor').style.height=`${Math.max(240,$('notes-editor').scrollHeight)}px`;}
   function drawNotes(){
     $('notes-ink').replaceChildren();
@@ -37,9 +40,9 @@ try {
     if(role==='presenter'){
       $('counter').textContent=`${current+1} / ${deck.slides.length}`;$('jump').value=String(current);
       $('previous').disabled=current===0;$('next').disabled=current===deck.slides.length-1;
-      $('notes-text').textContent=deck.notes[current]||'这一页没有讲稿。';
+      $('notes-text').textContent=deck.notes[current]||t('No notes for this slide.');
       $('notes-editor').value=deck.notes[current]||'';sizeEditor();
-      $('note-page').textContent=`第 ${current+1} 页`;
+      $('note-page').textContent=t('Slide {number}', {number:current+1});
       if(changed)$('notes-scroll').scrollTop=0;
       stored(`page-${room}`,String(current));drawNotes();
     }
@@ -49,26 +52,26 @@ try {
   host={count:deck.slides.length,index:()=>current,show,slideEl:i=>layers[i],surface:$('stage')};
   show(current);new ResizeObserver(fit).observe($('viewport'));
   const transport=createTransport(room,key,text=>{if($('connection'))$('connection').textContent=text;});
-  window.SlideLink.start({role,room,deck:room,host,aspect:deck.width/deck.height,transport});
+  window.SlideLink.start({role,room,deck:room,host,aspect:deck.width/deck.height,transport,translate:t});
   if(role==='presenter'){
     noteStatus();
     $('edit-notes').onclick=()=>{
       editing=!editing;$('notes-text').hidden=editing;$('notes-editor').hidden=!editing;
-      $('edit-notes').textContent=editing?'完成编辑':'编辑讲稿';
+      $('edit-notes').textContent=t(editing?'Done editing':'Edit notes');
       $('notes-ink').hidden=editing;$('private-pen').disabled=editing;
       if(editing){$('notes-editor').value=deck.notes[current];sizeEditor();$('notes-editor').focus();}
     };
     $('notes-editor').oninput=()=>{deck.notes[current]=$('notes-editor').value;$('notes-text').textContent=deck.notes[current];edited=JSON.stringify(deck.notes)!==JSON.stringify(lastSaved);stored(`notes-draft-${room}`,JSON.stringify(deck.notes));sizeEditor();noteStatus();};
     $('save-notes').onclick=async()=>{
-      $('save-notes').disabled=true;noteStatus('正在保存新版本…');
+      $('save-notes').disabled=true;noteStatus("Saving new version…");
       const notesToSave=[...deck.notes];
       try{
-        const res=await fetch(`/api/decks/${encodeURIComponent(room)}/revisions`,{method:'POST',headers:{'Content-Type':'application/json',Authorization:`Bearer ${key}`},body:JSON.stringify({notes:notesToSave,label:'讲稿修改 · '+new Date().toLocaleString('zh-CN')})});
-        const result=await res.json();if(!res.ok)throw Error(result.error||'保存失败');
+        const res=await fetch(`/api/decks/${encodeURIComponent(room)}/revisions`,{method:'POST',headers:{'Content-Type':'application/json',Authorization:`Bearer ${key}`},body:JSON.stringify({notes:notesToSave,label:t('Notes update')+' · '+new Date().toLocaleString(locale())})});
+        const result=await res.json();if(!res.ok)throw Error(result.error||"Save failed");
         lastSaved=notesToSave;edited=JSON.stringify(deck.notes)!==JSON.stringify(lastSaved);
-        noteStatus(edited?'新版已保存，另有新的未保存改动':'已保存新版本 · 当前投屏继续使用原链接');
+        noteStatus(edited?'Version saved; newer edits are still unsaved':'New version saved · Current screen link is unchanged');
         $('saved-links').replaceChildren();
-        for(const [name,url]of [['打开新版演讲者',result.presenter],['打开新版投屏',result.screen]]){const a=document.createElement('a');a.href=url;a.target='_blank';a.rel='noopener noreferrer';a.textContent=name;$('saved-links').append(a);}
+        for(const [name,url]of [["Open new presenter",result.presenter],["Open new screen",result.screen]]){const a=document.createElement('a');a.href=url;a.target='_blank';a.rel='noopener noreferrer';a.dataset.i18n=name;a.textContent=t(name);$('saved-links').append(a);}
         $('saved-links').hidden=false;
       }catch(e){noteStatus(e.message);}finally{$('save-notes').disabled=false;}
     };
@@ -90,9 +93,19 @@ try {
     function setFont(n){font=Math.max(16,Math.min(46,n));$('notes-content').style.setProperty('--note-size',`${font}px`);stored('notes-font',String(font));}
     setFont(font);$('font-minus').onclick=()=>setFont(font-2);$('font-plus').onclick=()=>setFont(font+2);
     let running=false,elapsed=0,started=0;
-    $('timer').onclick=()=>{if(running){elapsed+=Date.now()-started;running=false;}else{started=Date.now();running=true;}$('timer').textContent=running?'暂停':'计时';};
+    $('timer').onclick=()=>{if(running){elapsed+=Date.now()-started;running=false;}else{started=Date.now();running=true;}$('timer').textContent=running?"Pause timer":"Start timer";};
     setInterval(()=>{const s=Math.floor((elapsed+(running?Date.now()-started:0))/1000);$('clock').textContent=`${String(Math.floor(s/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`;},500);
-    $('private-pen').onclick=()=>{const on=$('notes-ink').classList.toggle('drawing');$('private-pen').classList.toggle('active',on);$('private-pen').textContent=on?'退出私人批注':'私人批注';};
+    $('private-pen').onclick=()=>{const on=$('notes-ink').classList.toggle('drawing');$('private-pen').classList.toggle('active',on);$('private-pen').textContent=t(on?'Exit private pen':'Private pen');};
+    applyLanguage();
+    document.addEventListener('languagechange',()=>{
+      document.title=deck.title+' · '+t('Presenter');
+      $('note-page').textContent=t('Slide {number}',{number:current+1});
+      $('notes-text').textContent=deck.notes[current]||t('No notes for this slide.');
+      $('edit-notes').textContent=t(editing?'Done editing':'Edit notes');
+      $('timer').textContent=t(running?'Pause timer':'Start timer');
+      $('private-pen').textContent=t($('notes-ink').classList.contains('drawing')?'Exit private pen':'Private pen');
+      noteStatus(noteStatusMessage);
+    });
     let drawing=null;
     $('notes-ink').onpointerdown=e=>{if(e.pointerType==='mouse'&&e.button!==0)return;e.preventDefault();if(drawing)return;drawing={id:e.pointerId,points:[]};(noteInk[current]||=[]).push(drawing.points);try{e.target.setPointerCapture(e.pointerId);}catch{}addPoint(e);};
     function addPoint(e){if(!drawing||e.pointerId!==drawing.id)return;const r=$('notes-ink').getBoundingClientRect();drawing.points.push([(e.clientX-r.left)/r.width*1000,(e.clientY-r.top)/r.height*1000]);drawNotes();}
@@ -103,7 +116,7 @@ try {
     $('notes-pane').remove();$('gutter').remove();$('footer').remove();$('header').remove();
     $('screen-hint').hidden=false;setTimeout(()=>$('screen-hint').hidden=true,6000);
   }
-  async function fullscreen(){try{if(document.fullscreenElement)await document.exitFullscreen();else await document.documentElement.requestFullscreen();}catch{if(role==='presenter')$('connection').textContent='此浏览器不支持全屏，可隐藏浏览器工具栏。';}}
+  async function fullscreen(){try{if(document.fullscreenElement)await document.exitFullscreen();else await document.documentElement.requestFullscreen();}catch{if(role==='presenter')$('connection').textContent=t('Fullscreen is unavailable in this browser.');}}
   $('fullscreen')?.addEventListener('click',fullscreen);$('screen-hint').onclick=fullscreen;
   if(role==='screen')document.addEventListener('keydown',e=>{if(e.key==='f'||e.key==='F')fullscreen();});
   $('fatal').hidden=true;

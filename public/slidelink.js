@@ -88,6 +88,7 @@
   function start(opt) {
     var host = opt.host, role = opt.role === "presenter" ? "presenter" : "screen";
     var room = opt.room;
+    var tr = opt.translate || function (text) { return text; };
     var H = Math.round(VB_W / (opt.aspect || 16 / 9));
 
     var me = rid(8), seq = 0, state = { c: 0, h: me, hr: role, i: host.index() }, joined = false, joinTimer = null, applying = false, lastMove = 0;
@@ -327,6 +328,8 @@
         '<button data-a="clear" aria-label="clear">' + icon('<path d="M4 6h12M8 6V4.300h4V6M5.800 6l.7 10.200h7L14.200 6M8.600 9v4.500M11.400 9v4.500"/>') + "</button>" +
         '<span class="sl-sep"></span><button data-a="finger" aria-pressed="false">Finger</button>');
       surface.appendChild(bar);
+      bar.querySelectorAll("[aria-label]").forEach(function (button) { button.setAttribute("data-i18n-aria-label", button.getAttribute("aria-label")); });
+      bar.querySelector("[data-a=finger]").setAttribute("data-i18n", "Finger");
       function paint() {
         Array.prototype.forEach.call(bar.querySelectorAll("button"), function (b) {
           var a = b.getAttribute("data-a");
@@ -555,15 +558,15 @@
       if (other.n !== host.count) return ["warn", "Different deck"];
       if (other.v !== PROTO) return ["warn", "Reload the other page"];
       if (role === "presenter") {
-        if (other.i !== state.i && Date.now() - lastMove > 1500) return ["warn", "Screen on slide " + (other.i + 1)];
-        return ["ok", "Screen linked" + (rtt != null ? " · " + Math.max(1, Math.round(rtt / 2)) + " ms" : "")];
+        if (other.i !== state.i && Date.now() - lastMove > 1500) return ["warn", tr("Screen on slide {number}", { number: other.i + 1 })];
+        return ["ok", tr("Screen linked") + (rtt != null ? " · " + Math.max(1, Math.round(rtt / 2)) + " ms" : "")];
       }
       return ["ok", "Linked"];
     }
     var quietTimer = null;
     function refresh() {
       var s = status(), cls = s[0] ? " sl-" + s[0] : "";
-      if (ui.pill) { ui.pill.className = "sl-ui sl-pill" + cls; ui.pillText.textContent = s[1]; }
+      if (ui.pill) { ui.pill.className = "sl-ui sl-pill" + cls; ui.pillText.textContent = tr(s[1]); }
       if (ui.corner) {
         var was = ui.corner.getAttribute("data-s");
         if (was !== s[0]) {
@@ -593,15 +596,15 @@
         document.body.appendChild(ui.corner);
       }
       var p = ui.panel = el("div", "sl-ui sl-panel",
-        "<h4>SlideLink · 连接状态</h4><input hidden>" +
-        "<div class='sl-row'><button data-a='pause' type='button'>Pause sync</button><button data-a='close' type='button'>关闭</button></div><pre></pre>");
+        "<h4 data-i18n='Connection'>Connection</h4><input hidden>" +
+        "<div class='sl-row'><button data-a='pause' type='button' data-i18n='Pause sync'>Pause sync</button><button data-a='close' type='button' data-i18n='Close'>Close</button></div><pre></pre>");
       p.hidden = true; document.body.appendChild(p);
       ui.input = p.querySelector("input"); ui.info = p.querySelector("pre");
       ["click", "contextmenu", "pointerdown", "touchstart", "touchend", "keydown"].forEach(function (t) { p.addEventListener(t, function (e) { e.stopPropagation(); }); });
       p.addEventListener("click", function (e) {
         var a = e.target.getAttribute && e.target.getAttribute("data-a");
         if (a === "close") togglePanel(false);
-        else if (a === "pause") { setPaused(!paused); e.target.textContent = paused ? "Resume sync" : "Pause sync"; }
+        else if (a === "pause") { setPaused(!paused); e.target.setAttribute("data-i18n", paused ? "Resume sync" : "Pause sync"); e.target.textContent = tr(paused ? "Resume sync" : "Pause sync"); }
         else if (a === "new") ui.input.value = rid(4) + "-" + rid(4) + "-" + rid(4);
         else if (a === "save") {
           var v = ui.input.value.trim(), u = new URL(location.href);
@@ -615,6 +618,7 @@
         if (e.metaKey || e.ctrlKey || e.altKey || /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName || "")) return;
         if (e.key === "l" || e.key === "L") togglePanel();
       });
+      document.addEventListener("languagechange", refresh);
       setInterval(refresh, 500);
     }
     function togglePanel(on) {

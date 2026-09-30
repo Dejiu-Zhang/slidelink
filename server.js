@@ -56,16 +56,16 @@ export async function createApp(options = {}) {
     const now = Date.now();
     let b = limits.get(key);
     if (!b || now - b.at > 60000) { b = { at: now, n: 0 }; limits.set(key, b); }
-    if (++b.n > 30) return res.status(429).json({ error: '上传过于频繁，请一分钟后再试。' });
+    if (++b.n > 30) return res.status(429).json({ error: "Too many uploads. Try again in a minute." });
     next();
   }
   function uploader(req, res, next) {
-    if (uploadKey && !matches(req.headers['x-upload-key'], hash(uploadKey))) return res.status(401).json({ error: '请输入正确的上传口令。' });
+    if (uploadKey && !matches(req.headers['x-upload-key'], hash(uploadKey))) return res.status(401).json({ error: "Enter a valid upload passcode." });
     next();
   }
   function workspace(req, res, next) {
     const key = req.headers['x-workspace-key'];
-    if (typeof key !== 'string' || !/^slw_[A-Za-z0-9_-]{32,64}$/.test(key)) return res.status(401).json({ error: '请先创建或打开工作空间。' });
+    if (typeof key !== 'string' || !/^slw_[A-Za-z0-9_-]{32,64}$/.test(key)) return res.status(401).json({ error: "Create or open a workspace first." });
     req.owner = hash(key);
     next();
   }
@@ -78,30 +78,37 @@ export async function createApp(options = {}) {
   });
   app.post('/api/folders', limit, uploader, workspace, json, async (req, res) => {
     const name = String(req.body?.name || '').trim().slice(0, 80);
-    if (!name) return res.status(400).json({ error: '请输入文件夹名称。' });
-    if (library.folders.filter(f => f.owner === req.owner).length >= 100) return res.status(400).json({ error: '每个工作空间最多 100 个文件夹。' });
+    if (!name) return res.status(400).json({ error: "Enter a folder name." });
+    if (library.folders.filter(f => f.owner === req.owner).length >= 100) return res.status(400).json({ error: "A workspace can have up to 100 folders." });
     const folder = { id: randomBytes(8).toString('hex'), name, owner: req.owner };
     library.folders.push(folder); await saveLibrary(); res.status(201).json({ id: folder.id, name });
+  });
+  app.get('/api/thumbnails/:id', workspace, (req, res) => {
+    const deck = decks.get(req.params.id);
+    if (!deck || deck.owner !== req.owner || deck.expiresAt <= Date.now()) return res.status(404).json({ error: 'File not found.' });
+    // Same sanitized slide data as the screen, limited to page one. No notes or credentials.
+    const { width, height, css, format } = deck;
+    res.json({ width, height, css, format, slides: deck.slides.slice(0, 1) });
   });
   app.patch('/api/folders/:id', workspace, json, async (req, res) => {
     const folder = library.folders.find(f => f.id === req.params.id && f.owner === req.owner);
     const name = String(req.body?.name || '').trim().slice(0, 80);
-    if (!folder) return res.status(404).json({ error: '文件夹不存在。' });
-    if (!name) return res.status(400).json({ error: '请输入名称。' });
+    if (!folder) return res.status(404).json({ error: "Folder not found." });
+    if (!name) return res.status(400).json({ error: "Enter a name." });
     folder.name = name; await saveLibrary(); res.json({ ok: true });
   });
   app.delete('/api/folders/:id', workspace, async (req, res) => {
     const folder = library.folders.find(f => f.id === req.params.id && f.owner === req.owner);
-    if (!folder) return res.status(404).json({ error: '文件夹不存在。' });
+    if (!folder) return res.status(404).json({ error: "Folder not found." });
     for (const p of library.projects) if (p.folderId === folder.id && p.owner === req.owner) p.folderId = '';
     library.folders = library.folders.filter(f => f !== folder);
     await saveLibrary(); res.status(204).end();
   });
   app.patch('/api/projects/:id', workspace, json, async (req, res) => {
     const project = library.projects.find(p => p.id === req.params.id && p.owner === req.owner);
-    if (!project) return res.status(404).json({ error: '项目不存在。' });
+    if (!project) return res.status(404).json({ error: "Project not found." });
     if (req.body?.folderId !== undefined) {
-      if (req.body.folderId !== '' && !library.folders.some(f => f.id === req.body.folderId && f.owner === req.owner)) return res.status(400).json({ error: '文件夹不存在。' });
+      if (req.body.folderId !== '' && !library.folders.some(f => f.id === req.body.folderId && f.owner === req.owner)) return res.status(400).json({ error: "Folder not found." });
       project.folderId = req.body.folderId;
     }
     if (typeof req.body?.name === 'string' && req.body.name.trim()) project.name = req.body.name.trim().slice(0, 150);
@@ -115,21 +122,21 @@ export async function createApp(options = {}) {
   });
   app.post('/api/decks', limit, uploader, workspace, json, async (req, res) => {
     try {
-      if (decks.size >= maxDecks) return res.status(507).json({ error: '演示存储已满，请删除旧演示后重试。' });
+      if (decks.size >= maxDecks) return res.status(507).json({ error: 'Storage is full. Delete an old version and try again.' });
       const deck = importDeck(req.body || {});
       let project;
       if (req.body.projectId) {
         project = library.projects.find(p => p.id === req.body.projectId && p.owner === req.owner);
-        if (!project) return res.status(404).json({ error: '项目不存在。' });
+        if (!project) return res.status(404).json({ error: "Project not found." });
       } else {
         const folderId = req.body.folderId || '';
-        if (folderId && !library.folders.some(f => f.id === folderId && f.owner === req.owner)) return res.status(400).json({ error: '文件夹不存在。' });
+        if (folderId && !library.folders.some(f => f.id === folderId && f.owner === req.owner)) return res.status(400).json({ error: "Folder not found." });
         project = { id: randomBytes(8).toString('hex'), owner: req.owner, name: deck.title, folderId, createdAt: Date.now() };
       }
       const id = randomBytes(12).toString('base64url');
       const presenterKey = token(), screenKey = token();
       const links = { screen: `/screen.html?room=${id}#${screenKey}`, presenter: `/presenter.html?room=${id}#${presenterKey}` };
-      const saved = { ...deck, owner: req.owner, projectId: project.id, versionLabel: String(req.body.versionLabel || '新版本').slice(0, 100), links, originalHtml: req.body.html, originalNotes: deck.notes.join('\n\n---\n\n'), presenterHash: hash(presenterKey), screenHash: hash(screenKey), createdAt: Date.now(), expiresAt: retention ? Date.now() + retention : 8640000000000000 };
+      const saved = { ...deck, owner: req.owner, projectId: project.id, versionLabel: String(req.body.versionLabel || "New version").slice(0, 100), links, originalHtml: req.body.html, originalNotes: deck.notes.join('\n\n---\n\n'), presenterHash: hash(presenterKey), screenHash: hash(screenKey), createdAt: Date.now(), expiresAt: retention ? Date.now() + retention : 8640000000000000 };
       // Reserve the slot before awaiting I/O; no concurrent request can exceed MAX_DECKS.
       decks.set(id, saved);
       try { await writeFile(path.join(dataDir, `${id}.json`), JSON.stringify(saved), { flag: 'wx', mode: 0o600 }); }
@@ -147,7 +154,7 @@ export async function createApp(options = {}) {
   }
   const auth = (req, res, next) => {
     req.access = authorize(req.params.id, req.headers.authorization?.replace(/^Bearer /, ''));
-    if (!req.access) return res.status(404).json({ error: '链接不正确、已被删除或已过期。' });
+    if (!req.access) return res.status(404).json({ error: "Invalid, deleted or expired link." });
     next();
   };
   app.get('/api/decks/:id', auth, (req, res) => {
@@ -157,14 +164,14 @@ export async function createApp(options = {}) {
     res.json({ title, width, height, css, slides, warnings, expiresAt, format, role, ...(role === 'presenter' ? { notes: deck.notes } : {}) });
   });
   app.post('/api/decks/:id/revisions', limit, auth, json, async (req, res) => {
-    if (req.access.role !== 'presenter') return res.status(403).json({ error: '只有演讲者可以保存讲稿。' });
+    if (req.access.role !== 'presenter') return res.status(403).json({ error: "Only the presenter can save notes." });
     const previous = req.access.deck;
     const notes = req.body?.notes;
-    if (!Array.isArray(notes) || notes.length !== previous.slides.length || notes.some(n => typeof n !== 'string') || notes.join('').length > 500000) return res.status(400).json({ error: '讲稿页数不匹配，或内容超过 50 万字。' });
-    if (decks.size >= maxDecks) return res.status(507).json({ error: '演示存储已满，请删除旧版本后重试。' });
+    if (!Array.isArray(notes) || notes.length !== previous.slides.length || notes.some(n => typeof n !== 'string') || notes.join('').length > 500000) return res.status(400).json({ error: "Notes must match the slide count and stay under 500,000 characters." });
+    if (decks.size >= maxDecks) return res.status(507).json({ error: "Storage is full. Delete an old version and try again." });
     const id = randomBytes(12).toString('base64url'), presenterKey = token(), screenKey = token();
     const links = { screen: `/screen.html?room=${id}#${screenKey}`, presenter: `/presenter.html?room=${id}#${presenterKey}` };
-    const saved = { ...previous, notes, originalNotes: notes.join('\n\n---\n\n'), versionLabel: String(req.body.label || '讲稿修改').slice(0,100), parentVersion: req.params.id, links, presenterHash: hash(presenterKey), screenHash: hash(screenKey), createdAt: Date.now(), expiresAt: retention ? Date.now() + retention : 8640000000000000 };
+    const saved = { ...previous, notes, originalNotes: notes.join('\n\n---\n\n'), versionLabel: String(req.body.label || "Notes update").slice(0,100), parentVersion: req.params.id, links, presenterHash: hash(presenterKey), screenHash: hash(screenKey), createdAt: Date.now(), expiresAt: retention ? Date.now() + retention : 8640000000000000 };
     decks.set(id, saved);
     try { await writeFile(path.join(dataDir, `${id}.json`), JSON.stringify(saved), { flag: 'wx', mode: 0o600 }); }
     catch (error) { decks.delete(id); throw error; }
@@ -172,14 +179,14 @@ export async function createApp(options = {}) {
   });
   app.get('/api/sources/:id/:kind', workspace, (req, res) => {
     const d = decks.get(req.params.id);
-    if (!d || d.owner !== req.owner || d.expiresAt <= Date.now()) return res.status(404).json({ error: '文件不存在。' });
+    if (!d || d.owner !== req.owner || d.expiresAt <= Date.now()) return res.status(404).json({ error: "File not found." });
     const isHtml = req.params.kind === 'slides';
     if (!isHtml && req.params.kind !== 'notes') return res.status(404).end();
     res.set('Content-Disposition', `attachment; filename="${isHtml ? 'slides.html' : 'notes.txt'}"`);
     res.type('text/plain').send(isHtml ? d.originalHtml : d.originalNotes || d.notes.join('\n\n---\n\n'));
   });
   app.delete('/api/decks/:id', auth, async (req, res) => {
-    if (req.access.role !== 'presenter') return res.status(403).json({ error: '只有演讲者可以删除演示。' });
+    if (req.access.role !== 'presenter') return res.status(403).json({ error: "Only the presenter can delete a presentation." });
     try { await unlink(path.join(dataDir, `${req.params.id}.json`)); }
     catch (error) { if (error.code !== 'ENOENT') throw error; }
     decks.delete(req.params.id);
@@ -187,7 +194,7 @@ export async function createApp(options = {}) {
     res.status(204).end();
   });
   app.use(express.static(path.join(root, 'public'), { etag: false }));
-  app.use((error, req, res, next) => res.status(error.status || 500).json({ error: error.type === 'entity.too.large' ? '文件太大，请使用小于 6 MB 的 HTML。' : '请求无法完成，请检查文件格式后重试。' }));
+  app.use((error, req, res, next) => res.status(error.status || 500).json({ error: error.type === 'entity.too.large' ? "File too large. Use HTML under 6 MB." : "Check the file format and try again." }));
   const server = createServer(app);
   server.requestTimeout = 30000;
   const wss = new WebSocketServer({ noServer: true, maxPayload: 65536, perMessageDeflate: false });

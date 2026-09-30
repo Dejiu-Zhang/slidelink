@@ -7,15 +7,24 @@ import { once } from 'node:events';
 import { WebSocket } from 'ws';
 import { importDeck, splitNotes } from '../lib/import.js';
 import { createApp, validatedMessage } from '../server.js';
+import { translate } from '../public/i18n.js';
 
 const html='<title>Test deck</title><style>.slide{color:navy}</style><section class="slide"><h1>Hello</h1><aside class="notes">PRIVATE INLINE NOTE</aside><script>bad()</script><img onerror="bad()" src="x"><!-- secret comment --></section><section class="slide"><h2>End</h2></section>';
 test('import preserves rendered content and separates private notes',()=>{
  const d=importDeck({html});assert.equal(d.slides.length,2);assert.equal(d.notes[0],'PRIVATE INLINE NOTE');
  assert(!JSON.stringify(d.slides).includes('PRIVATE'));assert(!d.slides[0].html.includes('<script'));assert(!d.slides[0].html.includes('onerror'));assert(!d.slides[0].html.includes('secret comment'));
- assert.throws(()=>importDeck({html,notes:'one'}),/讲稿分成了 1 页/);
+ assert.throws(()=>importDeck({html,notes:'one'}),/2 slides but 1 note sections/);
  assert.deepEqual(splitNotes('# Slide 1\nFirst\n# Slide 2\nSecond'),['First','Second']);
  assert.deepEqual(splitNotes('First\n---\n\n---\nThird'),['First','','Third']);
- assert.throws(()=>importDeck({html:'<p>No slides</p>'}),/未找到分页/);
+ assert.throws(()=>importDeck({html:'<p>No slides</p>'}),/No slides found/);
+});
+test('English default and Chinese UI messages preserve user content',()=>{
+ assert.equal(translate('New project'),'New project');
+ assert.equal(translate('New project','zh'),'新建项目');
+ assert.equal(translate('{count} slides','zh',{count:43}),'43 页');
+ assert.equal(translate('Found 43 slides but 1 note sections. Separate each page with --- on its own line, including empty pages.','zh'),'识别到 43 页 slides，但讲稿分成了 1 页。请用单独一行 --- 分隔每一页（无稿页也保留空白段）。');
+ assert.equal(translate('My presentation title','zh'),'My presentation title');
+ assert.equal(translate(undefined),'');
 });
 test('socket validation denies screen control and bounds stroke payloads',()=>{
  assert.equal(validatedMessage({k:'pos',i:0},2,'screen'),null);
@@ -38,6 +47,12 @@ test('workspace ownership, versions, notes privacy, WebSocket roles, deletion an
   const folder=await (await req('/api/folders',{name:'Research'})).json();
   const r=await req('/api/decks',{html,notes:'SCRIPT SECRET\n---\nFinish',folderId:folder.id,versionLabel:'v1'});assert.equal(r.status,201);
   const first=await r.json();
+  const thumb=await (await req('/api/thumbnails/'+first.id)).json();
+  assert.deepEqual(Object.keys(thumb).sort(),['css','format','height','slides','width']);
+  assert.equal(thumb.slides.length,1);assert(thumb.slides[0].html.includes('Hello'));
+  assert(!JSON.stringify(thumb).includes('SECRET'));assert(!JSON.stringify(thumb).includes('PRIVATE'));
+  assert.equal((await req('/api/thumbnails/'+first.id,undefined,b)).status,404);
+  assert.equal((await fetch(base+'/api/thumbnails/'+first.id)).status,401);
   const second=await (await req('/api/decks',{html,projectId:first.projectId,versionLabel:'v2'})).json();assert.notEqual(first.id,second.id);
   assert.equal((await req('/api/decks',{html,projectId:first.projectId},b)).status,404);
   const lib=await(await req('/api/library')).json();assert.equal(lib.versions.length,2);assert.equal(lib.projects.length,1);
@@ -66,5 +81,6 @@ test('workspace ownership, versions, notes privacy, WebSocket roles, deletion an
   assert.equal((await(await req('/api/library')).json()).versions.length,3);assert.equal((await access(screenKey)).status,200);
   assert.equal((await fetch(base+`/api/decks/${first.id}`,{method:'DELETE',headers:{Authorization:`Bearer ${presenterKey}`}})).status,204);
   assert.equal((await access(screenKey)).status,404);assert(!(await readdir(dataDir)).includes(first.id+'.json'));
+  assert.equal((await req('/api/thumbnails/'+first.id)).status,404);
  }finally{p?.terminate();s?.terminate();await instance.close();}
 });
